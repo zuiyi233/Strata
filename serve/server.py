@@ -281,6 +281,27 @@ def start_log_tail(log: str | None, offset: int, n: int = 20) -> str:
     return "\nthe engine log's last lines:\n" + "\n".join("  " + x for x in lines)
 
 
+def rotate_log(path: str, keep: int = 14) -> None:
+    """Session logs: an engine start moves the previous log into a `log-archive/` directory next to it
+    (timestamped) and lets the new session start on a fresh file - so grepping a live problem never trips
+    over earlier runs' lines. Keeps the newest `keep` archives; rotation failures never block a start."""
+    try:
+        if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+            return
+        arch = os.path.join(os.path.dirname(os.path.abspath(path)), "log-archive")
+        os.makedirs(arch, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        os.replace(path, os.path.join(arch, f"{os.path.basename(path)}.{stamp}"))
+        old = sorted(f for f in os.listdir(arch) if f.startswith(os.path.basename(path) + "."))
+        for f in old[:-keep] if len(old) > keep else []:
+            try:
+                os.remove(os.path.join(arch, f))
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def echo_requests(log_path: str, offset: int) -> None:
     """STRATA_REQUEST_LINES=1: one stdout line per finished request, from the engine's own summary in its log.
 
@@ -516,6 +537,7 @@ class StrataEngine:
         if lazy:
             return
         self.unloaded = False            # `ended` stays True until READY (below): not alive while starting (#344)
+        rotate_log(log)                                 # archive the previous session's log, start fresh
         self.log = open(log, "a", encoding="utf-8") if log else subprocess.DEVNULL
         loading = threading.Event()                     # set once READY: the narrator below stops
         log_start = os.path.getsize(log) if log else 0  # where this start's lines begin (start_failure_hint)
