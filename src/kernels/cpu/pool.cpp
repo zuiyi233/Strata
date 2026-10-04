@@ -105,6 +105,12 @@ CpuTopology detect_cpu_topology(bool skip_first, PoolAffinity affinity) {
         }
 
         if (affinity == PoolAffinity::All || !topo.is_hybrid) {
+            // #642 (from Hardin22's fork): on a hybrid CPU the P-cores first (the host takes the first of them), so a
+            // pool smaller than the core count (setup's --pool-workers for a hybrid CPU) runs on the P-cores and the
+            // first E-cores rather than on whatever the OS numbered first.  All cores alike: the order is unchanged.
+            if (topo.is_hybrid)
+                std::stable_sort(descs.begin(), descs.end(),
+                                 [](const CoreDesc& x, const CoreDesc& y) { return x.efficiency > y.efficiency; });
             for (const auto& c : descs) topo.worker_cores.push_back(c.lps[0]);
             if (skip_first && !topo.worker_cores.empty()) {
                 topo.host_core = topo.worker_cores.front();
@@ -225,6 +231,9 @@ CpuTopology detect_cpu_topology(bool skip_first, PoolAffinity affinity) {
     }
 
     if (affinity == PoolAffinity::All || !topo.is_hybrid) {
+        if (topo.is_hybrid)   // #642: the P-cores first (see the Windows branch)
+            std::stable_sort(all_cpus.begin(), all_cpus.end(),
+                             [](const CoreLinux& x, const CoreLinux& y) { return x.cap > y.cap; });
         for (const auto& cl : all_cpus) {
             if (!cl.is_sibling) topo.worker_cores.push_back(cl.cpu);
         }
@@ -557,7 +566,7 @@ void ExpertPool::drain(int id, ExpertScratch& scratch, uint32_t epoch) {
             const QuantTask& q = quant_tasks_[i];
             const int e = q.e, t = q.t;
             if (nfmt_ != nullptr) {
-                if (nfmt_->d_type == 42)
+                if (q2_native_kernels(nfmt_->d_type))
                     act_quant_any(split_multi_[(size_t) e].ff[t], FF, split_multi_[(size_t) e].a2[t]);
                 else
                     native_quant_h(*nfmt_, split_multi_[(size_t) e].ff[t], split_multi_[(size_t) e].hq[t]);
@@ -572,7 +581,7 @@ void ExpertPool::drain(int id, ExpertScratch& scratch, uint32_t epoch) {
                 const int e = (int) (r / per), r0 = (int) (r % per);
                 const int r1 = (int) std::min<int64_t>(per, r0 + (g1 - r));
                 SplitBufMulti& sb = split_multi_[(size_t) e];
-                if (mode_ == 5 && nfmt_->gu_type == 42) {
+                if (mode_ == 5 && q2_native_kernels(nfmt_->gu_type)) {
                     // a native Q2_0 pack: gate and up rows on the Q2_0 kernels, then SwiGLU
                     thread_local float gbuf[MAXT][FF], ubuf[MAXT][FF];
                     float* gp[MAXT];
@@ -588,7 +597,7 @@ void ExpertPool::drain(int id, ExpertScratch& scratch, uint32_t epoch) {
                     float* ff[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) ff[t] = sb.ff[t];
                     native_gu_rows(*nfmt_, mjobs_[e].blob, mjobs_[e].nact, mjobs_[e].nt, ff, r0, r1);
-                } else if (nfmt_->d_type == 42) {
+                } else if (q2_native_kernels(nfmt_->d_type)) {
                     // Q2_0 down (most IQ layers): the AVX-512 kernel, ggml-cpu has only a scalar one on x86
                     const ActQ* a2[MAXT];
                     for (int t = 0; t < mjobs_[e].nt; ++t) a2[t] = &sb.a2[t];
@@ -722,7 +731,7 @@ void ExpertPool::run_split_multi_native(const NativeFmt& f, ExpertJobMulti* jobs
             run_phase(7, (int) quant_tasks_.size());
         } else {
             for (const auto& q : quant_tasks_) {
-                if (f.d_type == 42)
+                if (q2_native_kernels(f.d_type))
                     act_quant_any(split_multi_[(size_t) q.e].ff[q.t], FF, split_multi_[(size_t) q.e].a2[q.t]);
                 else
                     native_quant_h(f, split_multi_[(size_t) q.e].ff[q.t], split_multi_[(size_t) q.e].hq[q.t]);

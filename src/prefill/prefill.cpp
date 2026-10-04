@@ -110,7 +110,20 @@ double g_pinned_share = 1.0;
 // 8192-token chunks: 96 slots 1153 tok/s, 384 1294 (the next layer's experts arrive during its attention half) -
 // and 96 when a large share goes through host copies (IQ3_S on 64 GB, a third unpinned: 96 slots 1216, 256 1070 -
 // the host copies are the limit and the bigger ring only takes cache slots).  STRATA_PREFILL_RING overrides.
+//
+// Those are slots on the pack they were measured on, and a slot is one WHOLE expert blob - a Q2_0 blob is
+// 1,382,400 B, so 384 slots is 506 MiB.  On a pack with bigger blobs the same slot count is a different amount of
+// memory: 1,912 MiB on Q8_0 (5,222,400 B), which is more than half of an 8 GB card's expert cache and what held
+// that card at a 1,024-token chunk when its own buffers would have fitted 6,144.  Measured on the 4-way rig, one
+// env var and nothing else: chunk 1,024 -> 6,144, prefill 87 -> 402 tok/s.  So the budget is kept in BYTES and the
+// slot count is derived from the pack (`ring_budget_slots`); Q2_0 still resolves to exactly 1024 (fused) and 384,
+// so the pack all of this was tuned on does not move.
 int g_ring_override = 0;   // #340: set by a layer split (Prefill::set_ring_override); 0 = the rule below
+// #583 (0.1.39b): the auto chunk scan's byte-budget ring (Prefill::set_ring_budget), for requests whose chunk is above
+// g_ring_small_max - the chunk 0.1.39's rule would have picked.  A prompt that fits that chunk keeps 0.1.39's ring:
+// on one chunk the smaller ring only slowed it (RTX 5070, 4K prompts: Coder -15%, IQ3_S -5%, IQ3_XXS -2%).
+int g_ring_budget = 0;
+int64_t g_ring_small_max = 0;
 // #136: the fused experts (STRATA_PF_FUSED=1) launch on a batch of a layer's streamed experts at once, so the ring
 // should hold a whole layer's (~460 of 512 on Q2_0): with 384 slots a layer's last batch waits for slots its own
 // first batch frees.  Measured on the 5070, Q2_0, the 4K / 32K code-agent prompts (one run each): fused at 384 slots
@@ -138,6 +151,30 @@ inline bool fused_ring() {
 // the largest ring: 512 slots; 1024 with the Q2_0 pack's fused experts (P3's smaller buffers, measured there) - the
 // native packs' fused layers were measured at 512
 inline int ring_cap() { return fused_ring() && !strata::kernels::cpu::expert_layout().native ? RING_MAX : 512; }
+// The ring's budget in bytes: the measured slot counts above, at the blob size they were measured with.  It is
+// bytes and not slots because a slot is one whole blob and the blob is the pack's - see the note above.
+inline constexpr uint64_t Q2_0_BLOB = 1382400ull;   // the blob of the pack the ring was tuned on
+inline uint64_t ring_bytes() {
+    const uint64_t slots = fused_ring() ? 1024ull : 384ull;   // #136: a fused ring holds two layers' experts
+    return (g_pinned_share >= 0.9 ? slots : slots / 4) * Q2_0_BLOB;
+}
+// ...and what that buys on THIS pack, never past ring_cap(): the slot count `init` lays out, and what the auto
+// chunk scan treats as a full ring.  A pack whose blobs are larger than Q2_0's gets fewer slots for the same
+// bytes, which is the point - the ring competes with the expert cache for the same VRAM.
+// 0.1.39b: on by default (#583); STRATA_RING_BYTES=0 restores 0.1.39's ring, loan and auto chunk list.  It moves the
+// prompt path's loan on a native pack (fewer ring slots, the rest kept as cache slots, a larger auto chunk), so a long
+// prompt's experts are read through a different mix of resident and streamed groups and its bits differ from 0.1.39's
+// (RTX 5070, IQ3_XXS, 32K prompt: +14% to +26%; teacher-forced against the FP16 prompt path in the same band).
+inline bool ring_bytes_on() {
+    static const bool on = [] { const char* v = std::getenv("STRATA_RING_BYTES"); return v == nullptr || v[0] != '0'; }();
+    return on;
+}
+inline int ring_budget_slots() {
+    const int64_t per = MAXBLOB();
+    const int64_t n = per > 0 ? (int64_t) (ring_bytes() / (uint64_t) per) : 0;
+    const int cap = ring_cap();
+    return (int) (n <= 0 ? 0 : (n > cap ? cap : n));
+}
 inline int ring_slots(size_t T) {
     const char* v = std::getenv("STRATA_PREFILL_RING");
 #if defined(STRATA_USE_HIP)
@@ -149,8 +186,14 @@ inline int ring_slots(size_t T) {
     }();
     if (!v && g_ring_override <= 0 && wmma) return (int64_t) T >= stream_all_min() ? 96 : STAGE;
 #endif
-    const int pinned_ring = fused_ring() ? 1024 : 384;
-    const int r = v ? std::atoi(v) : g_ring_override > 0 ? g_ring_override : (g_pinned_share >= 0.9 ? pinned_ring : 96);
+    // the byte budget as this pack's slots: 1024 fused / 384 not on Q2_0, fewer on a pack with bigger blobs.  The
+    // unpinned arm stays a slot count (96): it was measured where the host copies are the limit, and there the ring
+    // is not what is competing for VRAM.
+    // 0.1.39's ring (1024 fused / 384 pinned, 96 when a large share goes through host copies), and the #583 byte
+    // budget the auto scan chose for chunks past the size 0.1.39's rule would have picked (set_ring_budget)
+    const int pinned_ring = g_pinned_share >= 0.9 ? (fused_ring() ? 1024 : 384) : 96;
+    const bool budget = ring_bytes_on() && g_ring_budget > 0 && (int64_t) T > g_ring_small_max;
+    const int r = v ? std::atoi(v) : g_ring_override > 0 ? g_ring_override : budget ? g_ring_budget : pinned_ring;
     if (v && r == STAGE) return STAGE; // Explicit opt-in to routed-only staging, including large chunks.
     const int big = r < 16 ? 16 : r > ring_cap() ? ring_cap() : r;
     return (int64_t) T >= stream_all_min() ? big : STAGE;
@@ -1082,9 +1125,11 @@ bool Prefill::draft_kv(core::MtpDrafter& mtp, const float* R_rows, const int32_t
     return true;
 }
 namespace {
-// Layer split: STRATA_PREFILL_HELP=0 keeps every stage's prompt experts on its own GPU.
+// Layer split: STRATA_PREFILL_HELP=1 lends the idle stage's GPU (opt-in: the helped rows are computed in another MMQ
+// grouping and round differently from the default, like STRATA_SPLIT_OWN). Unset or 0: every stage's prompt experts on
+// its own GPU, as before.
 bool split_help_env() {
-    static const bool v = [] { const char* e = std::getenv("STRATA_PREFILL_HELP"); return e == nullptr || std::atoi(e) != 0; }();
+    static const bool v = [] { const char* e = std::getenv("STRATA_PREFILL_HELP"); return e != nullptr && std::atoi(e) != 0; }();
     return v;
 }
 // The share of a stage's streamed experts the idle stage's GPU takes for a one-chunk prompt of T tokens (0: none).
@@ -1311,6 +1356,10 @@ bool Prefill::set_peer(core::PeerExperts* peer, int64_t cap_rows, std::string& e
 
 void Prefill::set_pinned_share(double share) { g_pinned_share = share; }
 void Prefill::set_ring_override(int slots) { g_ring_override = slots > 0 ? slots : 0; }
+void Prefill::set_ring_budget(int slots, int64_t small_max) {
+    g_ring_budget = slots > 0 ? slots : 0;
+    g_ring_small_max = small_max > 0 ? small_max : 0;
+}
 double Prefill::pinned_share() { return g_pinned_share; }
 int64_t Prefill::stream_all_min_tokens() { return stream_all_min(); }
 
@@ -1323,7 +1372,19 @@ uint64_t Prefill::bytes_needed(const core::ModelGeometry& g, const core::Session
     o.take<uint16_t>((size_t) GEMM_SCRATCH, ok);
     o.take<uint8_t>(GEMM_WS, ok);
     auto f = [&](size_t n) { o.take<float>(n, ok); };
-    f(T * N); f(T * D); f(T * D); o.take<uint16_t>(T * D, ok); f(T * LR); o.take<uint16_t>(T * LR, ok);
+    // `carve`'s order, buffer for buffer: emb, R, xn, grs, xn16, lo, lo16, gated, inj, mixed, mixed_bf, mixed_h,
+    // bo.  This counted `xn` unconditionally (carve takes it only under STRATA_GR_UNFUSED) and never counted
+    // `grs`.  Net over-count T*(D-HC)*4 bytes: 42 MB at a 1024-token chunk, 252 MB (48 Q8_0 slots) at 6144 - the
+    // prompt path was told it had less room than it did.  Safe - the direction is over-estimating, and `take`
+    // still bounds-checks - but it under-sizes every loan, so every chunk the scan picks is one step smaller.
+    if (ring_bytes_on()) {
+        f(T * N); f(T * D);
+        if (gr_unfused()) f(T * D);
+        f(T * HC);
+    } else {   // STRATA_RING_BYTES=0: 0.1.39's count
+        f(T * N); f(T * D); f(T * D);
+    }
+    o.take<uint16_t>(T * D, ok); f(T * LR); o.take<uint16_t>(T * LR, ok);
     f(T * D); f(T * HC); f(T * N); o.take<uint16_t>(T * N, ok); o.take<uint16_t>(T * N, ok); f(T * N);
     if (bf16x2_hc()) { o.take<uint16_t>(T * D, ok); o.take<uint16_t>(T * LR, ok); }
     if (bf16x2()) o.take<uint16_t>(T * N, ok);
@@ -1350,6 +1411,33 @@ uint64_t Prefill::bytes_needed(const core::ModelGeometry& g, const core::Session
     take_stage(o, ss, s, stage, ok);
     return o.used + (8u << 20);   // alignment slack
 }
+
+uint64_t Prefill::bytes_needed_no_ring(const core::ModelGeometry& g, const core::SessionState& ss, int64_t chunk) {
+    return bytes_needed(g, ss, chunk) - (uint64_t) ring_slots((size_t) chunk) * (uint64_t) MAXBLOB();
+}
+
+int64_t Prefill::ring_default_slots() {
+    const int r = g_pinned_share >= 0.9 ? (fused_ring() ? 1024 : 384) : 96;
+    return (int64_t) std::min(r, ring_cap());
+}
+
+int64_t Prefill::ring_cap_for(int64_t old_chunk) {
+    // 0.1.39b (#583, measured on the RTX 5070): giving up ring slots for a bigger chunk paid where 0.1.39's ring held
+    // the chunk at 4096 or less (IQ3_XXS 32K prompts +14% to +26%: 4096/384 -> 6656/56) and lost where 0.1.39 already
+    // read 6144-token chunks (the Coder: 6144/384 -> 7936/199, 32K -12%).  From kKeepRingChunk on the ring keeps its
+    // 0.1.39 size and the scan only looks for a bigger chunk next to it (IQ3_XXS unpinned 6144/96 -> 6912/96: +9%).
+    constexpr int64_t kKeepRingChunk = 6144;
+    return old_chunk >= kKeepRingChunk ? ring_default_slots() : ring_max_slots();
+}
+
+// the unpinned arm keeps its measured 96 (the PR's rule; the byte budget would have been ~49 slots on IQ3_S)
+int64_t Prefill::ring_max_slots() {
+    return g_pinned_share >= 0.9 ? (int64_t) ring_budget_slots() : (int64_t) std::min(96, ring_cap());
+}
+
+int64_t Prefill::ring_slots_for(int64_t chunk) { return ring_slots((size_t) chunk); }
+
+bool Prefill::ring_bytes_enabled() { return ring_bytes_on(); }
 
 namespace {
 
@@ -1863,8 +1951,23 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
         }
         host_setup_ms += ms_since(tsetup);
         bool normed = false;   // F-2: the previous half's write already normed R for this half (grs, xn16)
+        // #579 #613 (opt-in diagnosis, STRATA_PF_STEP_SYNC=1): the compute and copy streams are waited for after each
+        // step named below, a step that took over 250 ms is logged, and a stall's report names the step it is in.
+        // Slower (a sync per step); the bytes are the same.
+        static const bool step_sync = [] { const char* e = std::getenv("STRATA_PF_STEP_SYNC"); return e && e[0] == '1'; }();
+        auto pf_step = [&](const char* what, int64_t layer) {
+            if (!step_sync) return;
+            core::progress_at(what, layer, p0);
+            const auto ts = Clock::now();
+            const cudaError_t a = cudaStreamSynchronize(m.cs), b = cudaStreamSynchronize(m.copy);
+            const double ms = ms_since(ts);
+            if (ms > 250.0 || a != cudaSuccess || b != cudaSuccess)
+                std::fprintf(stderr, "strata pf-step: chunk from token %lld, layer %lld: %s took %.0f ms (%s / %s)\n",
+                             (long long) p0, (long long) layer, what, ms, cudaGetErrorString(a), cudaGetErrorString(b));
+        };
         for (int64_t l = LB; l < LE; ++l) {
             core::progress_beat();   // the serve watchdog: a prompt chunk of 8192 tokens is still moving
+            if (l > LB) pf_step("reading the prompt (batched, step sync): the experts and the rest of layer", l - 1);
             core::progress_at("reading the prompt (batched): layer", l, p0);   // #251: a stall names layer and chunk
             const core::LayerView v(*m.wt, l);
             if (l == std::max<int64_t>(LB, 1) && !ple_land()) return false;   // the PLE rows, read from layer 1 on
@@ -2000,7 +2103,20 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                                                             core::qsa_kv_format(st),
                                                             (p0 + s.page_size - 1) / s.page_size, s, m.cs);
                         pt.mark(kPfQsa, cs);
+                        pf_step("reading the prompt (batched, step sync): the K/V staged from RAM at layer", l);
                     }
+                    // #579 #613 (HIP, opt-in A/B, STRATA_KV_HOST_DMA=1): the append writes the staging pool and the
+                    // resident slots only, and one DMA copies the chunk's blocks from the staging pool to the host copy
+                    // - no kernel writes host memory over PCIe.  The bytes every reader sees are the same (the staged
+                    // first block is complete; past the chunk's last cell nothing is read until a later append writes
+                    // it).  CUDA: never.
+#if defined(STRATA_USE_HIP)
+                    static const bool kv_host_dma = [] { const char* e = std::getenv("STRATA_KV_HOST_DMA"); return e && e[0] == '1'; }();
+#else
+                    constexpr bool kv_host_dma = false;
+#endif
+                    const bool host_by_dma = staged && kv_host_dma;
+                    const strata::kernels::KvHostPools* host_w = host_by_dma ? nullptr : &st.host;
                     if (st.kv_hybrid) {   // K8V4: K INT8 unrotated, V rotated Q4_0 (only V and the output rotate)
                         strata::kernels::fwht256_inplace_cuda(m.Vc, T * 2, m.cs);
                         kv_append(m.Kc, m.Kc, T, p0, st.page_table, s.page_size, nullptr, nullptr,
@@ -2015,12 +2131,17 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                         }
                         if (st.kv_q4)
                             strata::kernels::kv_append_q4(st.k_q4, st.v_q4, st.page_table, p0, T, m.Kc, m.Vc, s, m.cs,
-                                                          &st.host, staged ? &m.stage : nullptr);
+                                                          host_w, staged ? &m.stage : nullptr);
                         else
                             kv_append(m.Kc, m.Vc, T, p0, st.page_table, s.page_size, st.kv_int8 ? nullptr : st.k_pool,
                                       st.kv_int8 ? nullptr : st.v_pool, st.k_q, st.v_q, st.k_scale, st.v_scale, m.cs,
-                                      &st.host, staged ? &m.stage : nullptr);
+                                      host_w, staged ? &m.stage : nullptr);
+                        if (host_by_dma)
+                            strata::kernels::kv_unstage_to_host(pools_of(m.stage, m.ident_table), st.host,
+                                                                core::qsa_kv_format(st), p0 / s.page_size,
+                                                                (p0 + T + s.page_size - 1) / s.page_size, s, m.cs);
                     }
+                    if (staged) pf_step("reading the prompt (batched, step sync): the K/V append at layer", l);
                     split_q(m.Qf, m.q, T, m.cs);
                     rms_rows(m.q, (const float*) wqn->data, T * 24, 256, 256, EPS, m.cs);
                     rope(m.q, T, 24, 256, 6144, p0, strata::kernels::rope_scaling(), m.cs);
@@ -2278,7 +2399,12 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                         int32_t* src_h = grp_mapped ? m.grp_host + 2 * m.grp_tk : m.src_host.data();
                         if (grp_mapped) copy_i32(m.grp_dev, m.ids, T * K, m.cs);
                         else cudaMemcpyAsync(m.ids_host.data(), m.ids, (size_t) T * K * 4, cudaMemcpyDeviceToHost, m.cs);
+                        // #579: a stall here is the GPU (this layer's attention and router, or the previous layer's
+                        // work), not the host: the watchdog's report says so (only its text changes)
+                        core::progress_at("reading the prompt (batched): waiting for the GPU (attention, router) at layer",
+                                          l, p0);
                         cudaStreamSynchronize(m.cs);
+                        core::progress_at("reading the prompt (batched): layer", l, p0);
                         pt.fold();
                         if (pe.on) {   // the peer's marks so far are done: the primary waited for its last rows
                             int pd = 0; cudaGetDevice(&pd); cudaSetDevice(pe.dev); cudaStreamSynchronize(m.pp->s); pe.fold(); cudaSetDevice(pd);
