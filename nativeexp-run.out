@@ -1,0 +1,9 @@
+loading the vision encoder ...
+Traceback (most recent call last):
+  File "N:\Strata\serve\server.py", line 3060, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "N:\Strata\serve\server.py", line 2912, in main
+    vision = Vision(vcfg, log=open(cfg["log"], "a", encoding="utf-8") if cfg.get("log") else None,
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 22] Invalid argument: 'N:\\Strata\nativeexp.log'

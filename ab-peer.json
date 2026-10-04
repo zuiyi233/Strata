@@ -1,0 +1,50 @@
+{
+ "exe": "N:\\Strata\\engine\\strata.exe",
+ "args": [
+  "--pack",
+  "N:\\Strata-data\\packs\\swift-iq3_xxs",
+  "--native",
+  "L:\\Qwen3.8\\Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO\\Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+  "--ple-gguf",
+  "L:\\Qwen3.8\\Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO\\Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+  "--expert-profile",
+  "N:\\Strata\\data\\expert-profile.bin",
+  "--expert-cache",
+  "auto",
+  "--prefill",
+  "auto",
+  "--spec",
+  "4",
+  "--spec-min-p",
+  "0.5",
+  "--mtp",
+  "N:\\Strata-data\\mtp\\rt",
+  "--max-context",
+  "262144",
+  "--kv",
+  "int8",
+  "--kv-resident",
+  "32768",
+  "--vision",
+  "--vram-reserve-mib",
+  "700",
+  "--peer-device",
+  "1"
+ ],
+ "cwd": "N:\\Strata",
+ "tokenizer": "N:\\Strata-data\\packs\\swift-iq3_xxs\\tokenizer",
+ "model_name": "swift-1.5-iq3_xxs",
+ "log": "N:\\Strata\\strata-swift-iq3_xxs.log",
+ "lib_dirs": [
+  "N:\\Strata\\.venv\\Lib\\site-packages\\nvidia\\cu13\\bin\\x86_64"
+ ],
+ "port": 8080,
+ "gpus_asked": true,
+ "vision": {
+  "exe": "N:\\Strata\\engine\\strata-vision.exe",
+  "mmproj": "L:\\Qwen3.8\\Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO\\mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf",
+  "model": "L:\\Qwen3.8\\Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO\\Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf",
+  "gpu": true,
+  "max_tokens": 1024
+ }
+}

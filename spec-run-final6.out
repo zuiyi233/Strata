@@ -1,0 +1,20 @@
+loading the vision encoder ...
+loading the model (the first start takes a minute or two) ...
+[strata] starting the engine: reading the model's weights ...
+[strata] loading the experts into RAM (about 40 GB) and locking part of them for the GPU.
+         YOUR PC CAN BE SLOW OR STOP RESPONDING FOR 1-3 MINUTES NOW - this is normal.
+         Please wait and don't close this window; the browser opens when it is ready.
+[strata] still starting (27 s) - please wait ...
+[strata] experts loaded: 39.97 GiB at 1.70 GiB/s (41 s so far)
+[strata] filling the GPU's expert cache (9515 experts, 15.42 GiB of VRAM) ...
+[strata] almost ready ...
+[strata] other apps use the Chat settings: max_tokens=32768
+ready: http://127.0.0.1:8080/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 262144 tokens, images on)
+       open http://127.0.0.1:8080/ in a browser to chat; close this window to stop the model
+[strata] reading the prompt: 5,120 of 5,125 tokens, 4 s so far
+[strata] thinking: 22 of max 32768 tokens, 41.1 tok/s, 5 s
+[strata] thinking: 89 of max 32768 tokens, 57.9 tok/s, 6 s
+[strata] thinking: 155 of max 32768 tokens, 60.5 tok/s, 7 s
+[strata] done: 221 tokens in 8 s (62.2 tok/s) (disconnect, cancel=True), expert cache 91.7% hit
+[strata] refused a request for Host 'github.com:443' from 127.0.0.1: not a name this server answers to (add it to "allowed_hosts" in the config or STRATA_ALLOWED_HOSTS, or set an API key)
+[strata] refused a request for Host 'github.com:443' from 127.0.0.1: not a name this server answers to (add it to "allowed_hosts" in the config or STRATA_ALLOWED_HOSTS, or set an API key)

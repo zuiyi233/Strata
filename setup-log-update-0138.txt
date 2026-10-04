@@ -1,0 +1,13 @@
+Strata - Qwen3.8-Flash-Next on a normal PC (a GPU + system RAM + CPU)
+  [ok] numpy, jinja2, regex, pyyaml, tqdm, requests, cmake, ninja, pillow, psutil already installed
+  Updating the ready-made engine (0.1.35 -> 0.1.38 or newer) ...
+  Downloading the ready-made Strata engine ...
+  Strata engine:   0.01 / 0.12 GB (7%)     Strata engine:   0.02 / 0.12 GB (13%)     Strata engine:   0.03 / 0.12 GB (20%)     Strata engine:   0.03 / 0.12 GB (27%)     Strata engine:   0.04 / 0.12 GB (34%)     Strata engine:   0.05 / 0.12 GB (40%)     Strata engine:   0.07 / 0.12 GB (54%)     Strata engine:   0.08 / 0.12 GB (67%)     Strata engine:   0.09 / 0.12 GB (74%)     Strata engine:   0.11 / 0.12 GB (88%)     Strata engine:   0.12 / 0.12 GB (100%)   
+  [ok] Strata engine downloaded
+  [ok] ready-made engine 0.1.38 for sm_75, sm_86, sm_89, sm_120 (CUDA 13.0)
+  [ok] NVIDIA CUDA libraries (cuBLAS, CUDA runtime; ~0.4 GB) already installed
+  [ok] swift-1.5-iq3_xxs: up to date
+  [ok] swift-1.5-iq3_xxs: up to date
+  [ok] swift-1.5-iq3_xxs: up to date
+
+  [ok] Strata is updated (engine 0.1.38). Start the model with START-HERE.bat when you want it.

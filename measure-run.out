@@ -1,0 +1,41 @@
+loading the vision encoder ...
+loading the model (the first start takes a minute or two) ...
+[strata] starting the engine: reading the model's weights ...
+[strata] loading the experts into RAM (about 40 GB) and locking part of them for the GPU.
+         YOUR PC CAN BE SLOW OR STOP RESPONDING FOR 1-3 MINUTES NOW - this is normal.
+         Please wait and don't close this window; the browser opens when it is ready.
+[strata] still starting (28 s) - please wait ...
+[strata] experts loaded: 39.97 GiB at 1.69 GiB/s (44 s so far)
+[strata] filling the GPU's expert cache (9583 experts, 15.53 GiB of VRAM) ...
+[strata] almost ready ...
+Traceback (most recent call last):
+  File "N:\Strata\serve\server.py", line 3060, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "N:\Strata\serve\server.py", line 2925, in main
+    engine = StrataEngine(exe, engine_args(cfg), cwd=cfg.get("cwd"), log=cfg.get("log"), env=env, lazy=lazy)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "N:\Strata\serve\server.py", line 362, in __init__
+    raise RuntimeError("the engine exited before it was ready" + (f" (see {log})" if log else "") +
+RuntimeError: the engine exited before it was ready (see N:\Strata\measure-gpufloor.log)
+the engine log's last lines:
+  strata generate: KV streaming: 65536 of 262144 cells per QSA layer in VRAM, the K/V in 3.09 GiB of pinned RAM
+  strata generate: PLE on, table 320001536 rows of L:\Qwen3.8\Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO\Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf
+  strata mtp: draft layer loaded, 834 MiB of VRAM (experts 675, dense 111), files read in 0.65 s (1201 MiB/s)
+  strata generate: GPU 0: NVIDIA GeForce RTX 3090, compute capability 8.6
+  strata generate: expert arena read unbuffered (0 of 32 probe reads from the file cache; 32.3 GiB available, 70.7 GiB of files)
+  strata generate: expert arena: locked 2 MiB via working-set minimum + VirtualLock; cudaHostRegister of the whole arena FAILED (out of memory); 48 slices pinned (39 GiB); large pages refused for 42916118528 B (GetLargePageMinimum=2097152, VirtualAlloc error 1314); using 4 KB pages
+  strata generate: loaded 39.97 GiB at 1.69 GiB/s
+  strata generate: experimental native Q5_K head, 437043200 bytes
+  strata generate: expert cache auto: 16.81 GiB free, 700 MiB reserved (+182 MiB for the draft head) -> 7350 slots
+  strata generate: only 340 MiB free once the slots are written (reserve 700 MiB); shrinking the expert cache
+  strata generate: expert cache 9583 slots, 15.53 GiB of VRAM; policy is
+  strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,
+                   so a reply can differ slightly from a run without the cache (same quality:
+                   bench/results/2026-09-27-cache-parity).
+                   PROFILE, ranked by routing frequency, no eviction.
+  strata generate: pre-filled 9583 of 9583 slots from the profile; slot 0 verified
+  strata generate: R4 hit path ON - resident experts are computed on the GPU
+  strata generate: 23 expert-pool workers + the host thread
+  strata generate: session is up (engine 0.1.38)
+  strata generate: session_replay_full: session_replay_full: not captured with post graphs

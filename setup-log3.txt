@@ -1,0 +1,47 @@
+Strata - Qwen3.8-Flash-Next on a normal PC (a GPU + system RAM + CPU)
+
+=== Step 1: checking your PC ===
+  Your NVIDIA GPUs:
+    GPU 0: NVIDIA GeForce RTX 3090, 24 GB VRAM - can be used
+    GPU 1: Tesla T10, 16 GB VRAM - can be used
+  [ok] GPU: NVIDIA GeForce RTX 3090, 24.0 GB VRAM, compute capability 8.6, driver 616.92
+  [ok] RAM: 96 GB
+  [ok] CPU: AMD Ryzen Threadripper 3960X 24-Core Processor (AVX2)
+
+=== Step 2: your choices ===
+  [ok] model: Swift 1.5
+  Its license: Swift Open License 1.0: https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+
+  1) IQ2_XS   2-bit i-quant, a little better quality, close in speed; download 68 GB, uses ~36 GB of RAM
+  2) IQ3_XXS  3-bit i-quant, better quality, slower (more CPU work per token); download 76 GB, uses ~43 GB of RAM
+  [ok] size: IQ3_XXS
+  [ok] context: 262144 tokens
+  [ok] KV cache: 8-bit
+  [ok] images: on
+
+=== Step 3: Python packages ===
+  [ok] numpy, jinja2, regex, pyyaml, tqdm, requests, cmake, ninja, pillow, psutil already installed
+
+=== Step 4: the Strata engine ===
+  [ok] llama.cpp 3cf0325 (gguf-py, ggml, mtmd)
+  [ok] ready-made engine already installed
+  [ok] NVIDIA CUDA libraries (cuBLAS, CUDA runtime; ~0.4 GB) already installed
+  [ok] engine: N:\Strata\engine\strata.exe
+
+=== Step 5: downloading Swift 1.5 IQ3_XXS ===
+  [ok] model files present
+  [ok] vision encoder: L:\Qwen3.8\Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO\mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf
+
+=== Step 6: preparing the model for Strata ===
+  [ok] model prepared: N:\Strata-data\packs\swift-iq3_xxs
+  [ok] MTP draft layer: N:\Strata-data\mtp\rt
+
+=== Step 7: writing the start script ===
+  [ok] KV streaming on: the context's KV cache lives in RAM (3.6 GB), more experts fit in VRAM
+  [ok] start script: run-swift-iq3_xxs.bat
+
+All set.
+  API (OpenAI):     http://127.0.0.1:8080/v1   (any API key; model name: anything)
+  API (Anthropic):  http://127.0.0.1:8080/v1/messages
+  Next time:        just run START-HERE.bat (or run-swift-iq3_xxs.bat) - it starts right away
+  Images:           send them in the chat page, in chat.py (/image <path>) or over the API

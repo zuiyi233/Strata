@@ -1,0 +1,26 @@
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]}
+
+: keep-alive
+
+: keep-alive
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": "The"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": " user"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": " wants"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": " the"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": " dominant"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": " color"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": " pattern"}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {"reasoning_content": "."}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-bd1da24ea8e44939ae1d805e", "object": "chat.completion.chunk", "created": 1791028652, "model": "swift-1.5-iq3_xxs", "choices": [{"index": 0, "delta": {}, "finish_reason": "length"}], "usage": {"prompt_tokens": 1088, "completion_tokens": 8, "total_tokens": 1096, "prompt_tokens_details": {"cached_tokens": 0}}, "timings": {"cache_n": 0, "prompt_n": 1088, "prompt_ms": 2571.7, "prompt_per_token_ms": 2.364, "prompt_per_second": 423.1, "predicted_n": 8, "predicted_ms": 146.2, "predicted_per_token_ms": 18.275, "predicted_per_second": 54.7, "draft_n": 4, "draft_n_accepted": 3}}
+
+data: [DONE]
+

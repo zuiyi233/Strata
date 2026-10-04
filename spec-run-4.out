@@ -1,0 +1,40 @@
+loading the vision encoder ...
+loading the model (the first start takes a minute or two) ...
+[strata] starting the engine: reading the model's weights ...
+[strata] loading the experts into RAM (about 40 GB) and locking part of them for the GPU.
+         YOUR PC CAN BE SLOW OR STOP RESPONDING FOR 1-3 MINUTES NOW - this is normal.
+         Please wait and don't close this window; the browser opens when it is ready.
+[strata] still starting (27 s) - please wait ...
+[strata] experts loaded: 39.97 GiB at 1.69 GiB/s (42 s so far)
+[strata] filling the GPU's expert cache (9153 experts, 14.83 GiB of VRAM) ...
+[strata] almost ready ...
+ready: http://127.0.0.1:8080/v1  (OpenAI: /v1/chat/completions, Anthropic: /v1/messages, context 262144 tokens, images on)
+       open http://127.0.0.1:8080/ in a browser to chat; close this window to stop the model
+[strata] reading the prompt: 8,192 of 164,521 tokens, 4 s so far
+[strata] reading the prompt: 16,384 of 164,521 tokens, 7 s so far
+[strata] reading the prompt: 24,576 of 164,521 tokens, 10 s so far
+[strata] reading the prompt: 32,768 of 164,521 tokens, 14 s so far
+[strata] reading the prompt: 40,960 of 164,521 tokens, 17 s so far
+[strata] reading the prompt: 49,152 of 164,521 tokens, 21 s so far
+[strata] reading the prompt: 57,344 of 164,521 tokens, 25 s so far
+[strata] reading the prompt: 65,536 of 164,521 tokens, 28 s so far
+[strata] reading the prompt: 73,728 of 164,521 tokens, 32 s so far
+[strata] reading the prompt: 81,920 of 164,521 tokens, 36 s so far
+[strata] reading the prompt: 90,112 of 164,521 tokens, 40 s so far
+[strata] reading the prompt: 98,304 of 164,521 tokens, 45 s so far
+[strata] reading the prompt: 106,496 of 164,521 tokens, 49 s so far
+[strata] reading the prompt: 114,688 of 164,521 tokens, 53 s so far
+[strata] reading the prompt: 122,880 of 164,521 tokens, 58 s so far
+[strata] reading the prompt: 131,072 of 164,521 tokens, 62 s so far
+[strata] reading the prompt: 139,264 of 164,521 tokens, 67 s so far
+[strata] reading the prompt: 147,456 of 164,521 tokens, 71 s so far
+[strata] reading the prompt: 155,648 of 164,521 tokens, 76 s so far
+[strata] reading the prompt: 163,840 of 164,521 tokens, 81 s so far
+[strata] reading the prompt: 164,516 of 164,521 tokens, 83 s so far
+[strata] thinking: 20 of max 512 tokens, 43.2 tok/s, 84 s
+[strata] done: 39 tokens in 85 s (45.7 tok/s) (stop, cancel=False), expert cache 83.7% hit
+[strata] done: 39 tokens in 1 s (62.9 tok/s) (stop, cancel=False), expert cache 91.9% hit
+[strata] thinking: 41 of max 512 tokens, 63.4 tok/s, 1 s
+[strata] done: 56 tokens in 1 s (67.3 tok/s) (stop, cancel=False), expert cache 94.4% hit
+[strata] thinking: 47 of max 512 tokens, 68.8 tok/s, 1 s
+[strata] done: 52 tokens in 1 s (69.8 tok/s) (stop, cancel=False), expert cache 95.9% hit
