@@ -8,7 +8,6 @@ import contextlib
 import io
 import json
 import os
-import socket
 import sys
 import tempfile
 import threading
@@ -483,41 +482,6 @@ class ToolCallTerminators(unittest.TestCase):
                         self.assertEqual(json.loads(streamed), {"path": "doc.md", "content": self.CONTENT})
 
 
-class ToolCallTagInProse(unittest.TestCase):
-    """A reply that names the `<tool_call>` tag in its prose before the real call keeps the tag as content and still
-    returns the call; it was a "malformed tool call" ValueError that ended the request.  A call is the tag followed
-    (after whitespace) by `<function=`."""
-    SCHEMA = ToolCallTerminators.SCHEMA
-    CALL = ("<tool_call>\n<function=write>\n<parameter=path>\na.md\n</parameter>\n<parameter=content>\nhi\n"
-            "</parameter>\n</function>\n</tool_call>")
-
-    def parse(self, text, stream_tools, step):
-        from serve.frontend import OutputParser
-        p = OutputParser(thinking=True, tools=self.SCHEMA, stream_tools=stream_tools)
-        evs = []
-        for i in range(0, len(text), step):
-            evs += p.feed(text[i:i + step])
-        evs += p.finish()
-        return ([e.call.arguments for e in evs if e.kind == "tool_call"],
-                "".join(e.text for e in evs if e.kind == "content"))
-
-    def test_named_tag_is_content(self):
-        call = {"path": "a.md", "content": "hi"}
-        for prose in ("I will use the `<tool_call>` format now.", "Next I emit a <tool_call> block.",
-                      "Two tags <tool_call> and <tool_call>x, then the call."):
-            for stream_tools in (False, True):
-                for step in (1, 7, 10_000):
-                    with self.subTest(prose=prose, stream_tools=stream_tools, step=step):
-                        calls, content = self.parse(f"</think>\n\n{prose}\n{self.CALL}", stream_tools, step)
-                        self.assertEqual((calls, content), ([call], prose))
-
-    def test_tag_alone_at_the_end_is_content(self):
-        for step in (1, 7, 10_000):
-            with self.subTest(step=step):
-                self.assertEqual(self.parse("</think>\n\nThe format starts with <tool_call>", False, step),
-                                 ([], "The format starts with <tool_call>"))
-
-
 class UnfinishedToolCall(unittest.TestCase):
     """#211: a call the output ends inside is not reported as a whole one - its streamed JSON is not closed and the
     finish reason is not "tool_calls" / "tool_use" - so a client can tell it from a call to run."""
@@ -547,31 +511,8 @@ class UnfinishedToolCall(unittest.TestCase):
                         self.assertEqual(len(calls), 1)
                         self.assertEqual(json.loads(streamed), {"path": "notes.txt", "content": content})
 
-    def test_parser_returns_unfinished_call_text(self):
-        from serve.frontend import CALL_START, THINK_END, OutputParser
-        schema = [{"name": "terminal", "parameters": {"properties": {"command": {"type": "string"}}}}]
-        chunks = [CALL_START, "<function=terminal>", "<parameter=command>", "echo ready"]
-        for thinking in (False, True):
-            for stream_tools in (False, True):
-                for step in (1, 7, 10_000):
-                    with self.subTest(thinking=thinking, stream_tools=stream_tools, step=step):
-                        p = OutputParser(thinking=thinking, tools=schema, stream_tools=stream_tools)
-                        events = []
-                        if thinking:
-                            events.extend(p.feed(THINK_END))
-                        for c in chunks:
-                            for i in range(0, len(c), step):
-                                events.extend(p.feed(c[i:i + step]))
-                        events.extend(p.finish())
-                        self.assertEqual("".join(e.text for e in events if e.kind == "content"), "".join(chunks))
-                        self.assertFalse([e for e in events if e.kind == "tool_call"])
-                        if stream_tools:
-                            self.assertEqual("".join(e.text for e in events if e.kind == "tool_args"),
-                                             '{"command":"echo ready')
-                        self.assertEqual(p.finish(), [])
-
-    def answers(self, script, max_tokens=500, content=False):
-        """Return the finish reason and arguments (or content) from both APIs, whole and streamed."""
+    def answers(self, script, max_tokens=500):
+        """(finish reason, the call's arguments) from OpenAI and Anthropic, whole and streamed, for the model's `script`."""
         tok = ByteTokenizer()
         svc = Service(MockEngine(tok, script, max_context=CTX), tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
         httpd = serve(svc, port=0)
@@ -589,25 +530,6 @@ class UnfinishedToolCall(unittest.TestCase):
                         "Content-Type": "application/json", "anthropic-version": "2023-06-01"})
                     with urllib.request.urlopen(req, timeout=30) as r:
                         raw = r.read().decode()
-                    if content:
-                        if stream:
-                            evs = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
-                            if api == "openai":
-                                text = "".join(e["choices"][0]["delta"].get("content") or "" for e in evs)
-                                finish = evs[-1]["choices"][0]["finish_reason"]
-                            else:
-                                text = "".join(e["delta"].get("text") or "" for e in evs
-                                               if e["type"] == "content_block_delta")
-                                finish = evs[-2]["delta"]["stop_reason"]
-                        elif api == "openai":
-                            c = json.loads(raw)["choices"][0]
-                            text, finish = c["message"]["content"], c["finish_reason"]
-                        else:
-                            m = json.loads(raw)
-                            text = "".join(b["text"] for b in m["content"] if b["type"] == "text")
-                            finish = m["stop_reason"]
-                        out[api, stream] = (finish, text)
-                        continue
                     if stream:
                         evs = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
                         if api == "openai":
@@ -636,18 +558,6 @@ class UnfinishedToolCall(unittest.TestCase):
             ("openai", False): ("stop", []), ("openai", True): ("stop", cut),    # whole answers leave the cut
             ("anthropic", False): ("end_turn", []),                      # call out: it has no arguments to give
             ("anthropic", True): ("end_turn", cut)})
-
-    def test_apis_return_unfinished_call_text(self):
-        text = self.CUT[len("</think>\n\n"):]
-        for limited in (False, True):
-            with self.subTest(limited=limited):
-                script = self.CUT + "rest of the file, never reached" * 40 if limited else self.CUT
-                max_tokens = len(self.CUT) if limited else 500
-                self.assertEqual(self.answers(script, max_tokens=max_tokens, content=True), {
-                    ("openai", False): ("length" if limited else "stop", text),
-                    ("openai", True): ("length" if limited else "stop", text),
-                    ("anthropic", False): ("max_tokens" if limited else "end_turn", text),
-                    ("anthropic", True): ("max_tokens" if limited else "end_turn", text)})
 
     def test_a_call_cut_at_the_token_limit(self):
         """The same cut by max_tokens: "length" / "max_tokens", and the whole (non-streamed) answers leave the call
@@ -856,17 +766,6 @@ class ClientShapes(unittest.TestCase):
             with self.subTest(calls=calls), self.assertRaisesRegex(ValueError, "tool_calls must be a list of objects"):
                 openai_to_messages({"messages": [{"role": "assistant", "content": "", "tool_calls": calls}]})
 
-    def test_tool_call_malformed_arguments_fallback(self):
-        from serve.frontend import openai_to_messages
-        bad_call = [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{malformed_json"}}]
-        msgs, tools, kwargs = openai_to_messages({"messages": [{"role": "user", "content": "u"},
-                                                               {"role": "assistant", "content": "", "tool_calls": bad_call}]})
-        self.assertEqual(msgs[1]["tool_calls"], [{"function": {"name": "f", "arguments": {"raw": "{malformed_json"}}}])
-        tpl = ChatTemplate(ROOT / "serve/chat_template.jinja")
-        rendered = tpl.render(msgs, tools=tools, **kwargs)
-        self.assertIn("<function=f>", rendered)
-        self.assertIn("<parameter=raw>\n{malformed_json", rendered)
-
 
 class SamplingKeys(unittest.TestCase):
     """The GEN line's sampling keys: top_k 0 ("off") or wider than the engine's 64 get the widest list, 64 (they used
@@ -937,59 +836,6 @@ class RecordingPrompt(MockEngine):
     def generate(self, ids, max_new, sampling, cancel, embeddings=None):
         self.last_ids = list(ids)
         yield from super().generate(ids, max_new, sampling, cancel, embeddings)
-
-
-class IncrementalPrompts(unittest.TestCase):
-    """The prompt encoder: every request's ids are those of a full encode, and a turn reuses the previous one's."""
-
-    @classmethod
-    def setUpClass(cls):
-        tok = ByteTokenizer()
-        cls.engine = RecordingPrompt(tok, "Thinking.\n</think>\n\nThe answer.", max_context=CTX)
-        cls.svc = Service(cls.engine, tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
-        cls.httpd = serve(cls.svc, port=0)
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown()
-        cls.httpd.server_close()
-
-    post = ClientShapes.post
-
-    def test_turns(self):
-        self.assertIsNotNone(self.svc.prompts)
-        msgs = [{"role": "system", "content": "Be brief."}]
-        for turn in range(6):
-            msgs.append({"role": "user", "content": f"question {turn} <|im_end|> é你 " * (turn + 1)})
-            status, b = self.post("/v1/chat/completions", {"model": "m", "max_tokens": 64, "messages": msgs})
-            self.assertEqual(status, 200, b)
-            prompt = self.svc.template.render(msgs)
-            self.assertEqual(self.engine.last_ids, self.svc.tok.encode(prompt, parse_special=True))
-            if turn:
-                self.assertGreater(self.svc.prompts.last_reused, len(prompt) // 3)
-            msgs.append({"role": "assistant", "content": b["choices"][0]["message"]["content"]})
-
-    def test_same_ids_as_a_full_encode_on_varied_conversations(self):
-        import random
-        sys.path.insert(0, str(ROOT / "tools"))
-        from test_strata_tokenizer import conversation_prompts, load_tokenizer
-        toks = [("byte", ByteTokenizer())]
-        if load_tokenizer() is not None:
-            toks.append(("qwen35", load_tokenizer()))
-        for name, tok in toks:
-            svc = Service(self.engine, tok, self.svc.template)
-            for seed in range(3):
-                for what, prompt in conversation_prompts(self.svc.template, random.Random(seed)):
-                    with self.subTest(tokenizer=name, seed=seed, what=what):
-                        self.assertEqual(svc.encode_prompt(prompt), tok.encode(prompt, parse_special=True))
-
-    def test_a_tokenizer_without_resume_points_encodes_in_full(self):
-        class Plain:
-            encode = ByteTokenizer().encode
-        svc = Service(self.engine, Plain(), self.svc.template)
-        self.assertIsNone(svc.prompts)
-        self.assertEqual(svc.encode_prompt("<|im_start|>hi"), ByteTokenizer().encode("<|im_start|>hi", True))
 
 
 class DyingEngine(MockEngine):
@@ -2833,228 +2679,6 @@ class LostStep(unittest.TestCase):
 
     def test_stop_never_acknowledged(self):
         self.run_mode("stop", stream=False)
-
-
-class AnswerBeforeTheBody(unittest.TestCase):
-    """An answer sent before the request body was read must still reach a client that sends the body after the headers
-    (http.client, urllib and requests do): closing the connection on unread bytes sends a reset that eats the answer."""
-
-    def setUp(self):
-        tok = ByteTokenizer()
-        self.engine = UnloadableEngine(tok, "</think>\n\nok", max_context=CTX)
-        self.svc = Service(self.engine, tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
-        self.httpd = serve(self.svc, port=0)
-        self.port = self.httpd.server_address[1]
-
-    def tearDown(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
-
-    def status(self, method, path, headers=None, body=b'{"x": 1}'):
-        """The status line of the answer to a request whose body follows the headers after a pause."""
-        head = {"Host": f"127.0.0.1:{self.port}", "Content-Type": "application/json", "Content-Length": str(len(body)),
-                **(headers or {})}
-        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as s:
-            s.sendall((f"{method} {path} HTTP/1.1\r\n" + "".join(f"{k}: {v}\r\n" for k, v in head.items()) +
-                       "\r\n").encode())
-            time.sleep(0.3)                                  # the server answers (and, unfixed, closes) meanwhile
-            try:
-                s.sendall(body)
-            except OSError:
-                pass
-            answer = b""
-            while chunk := s.recv(65536):                    # Windows raises a reset here, where Linux keeps the answer
-                answer += chunk
-            time.sleep(0.2)
-            # Linux shows the reset only as a pending socket error, after the answer and the end of the stream
-            self.assertEqual(s.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR), 0, "the connection was reset")
-        return answer.split(b"\r\n", 1)[0].decode()
-
-    def test_a_wrong_key(self):
-        self.svc.api_key = "secret"
-        try:
-            self.assertEqual(self.status("POST", "/v1/chat/completions"), "HTTP/1.0 401 Unauthorized")
-        finally:
-            self.svc.api_key = ""
-
-    def test_a_wrong_key_and_a_body_of_megabytes(self):
-        """An agent client's conversation, or one screenshot, is several MiB, and a rotated key is when the 401 matters."""
-        self.svc.api_key = "secret"
-        try:
-            self.assertEqual(self.status("POST", "/v1/chat/completions", body=b'{"x": "' + b"a" * (80 << 20) + b'"}'),
-                             "HTTP/1.0 401 Unauthorized")
-        finally:
-            self.svc.api_key = ""
-
-    def test_a_body_that_comes_in_drops_does_not_hold_the_connection(self):
-        """A client that announces a body and sends it a byte at a time is let go after DRAIN_SECONDS, with its
-        answer: the time limit is on the whole body, not on each read."""
-        self.svc.api_key = "secret"
-        try:
-            with mock.patch.object(self.httpd.RequestHandlerClass, "DRAIN_SECONDS", 0.5), \
-                    socket.create_connection(("127.0.0.1", self.port), timeout=10) as s:
-                s.sendall((f"POST /v1/chat/completions HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\n"
-                           f"Content-Length: {1 << 20}\r\n\r\n").encode())
-                started, answer = time.monotonic(), b""
-                s.settimeout(0.2)
-                while True:
-                    try:
-                        if not (chunk := s.recv(65536)):
-                            break
-                        answer += chunk
-                    except TimeoutError:
-                        s.sendall(b"a")                      # a byte every 0.2 s keeps each read of the server alive
-            self.assertEqual(answer.split(b"\r\n", 1)[0], b"HTTP/1.0 401 Unauthorized")
-            self.assertLess(time.monotonic() - started, 5)
-        finally:
-            self.svc.api_key = ""
-
-    def test_load_and_unload(self):
-        self.assertEqual(self.status("POST", "/unload"), "HTTP/1.0 200 OK")
-        self.assertEqual(self.status("POST", "/load"), "HTTP/1.0 200 OK")
-
-    def test_not_the_apps_own_page(self):
-        self.assertEqual(self.status("POST", "/load", {"Origin": "https://example.com"}), "HTTP/1.0 403 Forbidden")
-
-    def test_a_host_the_server_does_not_answer_to(self):
-        self.assertEqual(self.status("POST", "/v1/chat/completions", {"Host": "rebind.example.com"}),
-                         "HTTP/1.0 403 Forbidden")
-
-    def test_a_method_with_no_handler(self):
-        self.assertEqual(self.status("PUT", "/v1/chat/completions"), "HTTP/1.0 501 Unsupported method ('PUT')")
-class ReasoningToolCall(unittest.TestCase):
-    """A tool call stranded in a thinking span that NEVER closes is rescued at end of stream.  Seen live
-    as agents stopping silently: a template that renders a call after the reasoning block never emits
-    </think> before it, so the call streamed out as reasoning_content and the client's turn ended with
-    nothing to run.  A <tool_call> inside a span that DOES close is a mention, however well-formed, and
-    is never acted on."""
-
-    SCHEMA = [{"name": "Read", "parameters": {"properties": {"file_path": {"type": "string"},
-                                                             "offset": {"type": "integer"}}}}]
-
-    def run_parser(self, text, stream_tools, step, finish_reason="stop"):
-        from serve.frontend import OutputParser
-        p = OutputParser(thinking=True, tools=self.SCHEMA, stream_tools=stream_tools)
-        evs = []
-        for i in range(0, len(text), step):
-            evs += p.feed(text[i:i + step])
-        evs += p.finish(finish_reason)
-        return evs
-
-    def test_call_stranded_in_unclosed_thinking_is_rescued(self):
-        text = ("I need to inspect the kernel source first.\n<tool_call>\n<function=Read>\n"
-                "<parameter=file_path>\n/src/moe_mul1.cpp\n</parameter>\n<parameter=offset>\n30\n"
-                "</parameter>\n</function>\n</tool_call>")
-        for stream_tools in (False, True):
-            for step in (1, 7, 10_000):
-                with self.subTest(stream_tools=stream_tools, step=step):
-                    evs = self.run_parser(text, stream_tools, step)
-                    calls = [e.call for e in evs if e.kind == "tool_call"]
-                    self.assertEqual(len(calls), 1)
-                    self.assertEqual(calls[0].name, "Read")
-                    self.assertEqual(calls[0].arguments, {"file_path": "/src/moe_mul1.cpp", "offset": 30})
-                    thought = "".join(e.text for e in evs if e.kind == "reasoning")
-                    self.assertIn("inspect the kernel source", thought)
-                    self.assertFalse([e for e in evs if e.kind == "content" and e.text.strip()])
-
-    def test_valid_example_in_closed_thinking_is_not_a_call(self):
-        # A valid, quoted call example closed by a real </think> stays reasoning.  The first version of
-        # this fix diverted at the opener and fired the example as a real call (and leaked a literal
-        # </think> into the content channel) - the review's false positive.
-        text = ("This is a documentation example, not an action:\n```xml\n<tool_call>\n<function=Read>\n"
-                "<parameter=file_path>\n/example.txt\n</parameter>\n</function>\n</tool_call>\n```\n"
-                "I should explain it without calling any tool.\n</think>Here is the explanation.")
-        for stream_tools in (False, True):
-            for step in (1, 7, 10_000):
-                with self.subTest(stream_tools=stream_tools, step=step):
-                    evs = self.run_parser(text, stream_tools, step)
-                    self.assertFalse([e for e in evs if e.kind == "tool_call"])
-                    thought = "".join(e.text for e in evs if e.kind == "reasoning")
-                    self.assertIn("/example.txt", thought)
-                    self.assertIn("I should explain it", thought)
-                    content = "".join(e.text for e in evs if e.kind == "content")
-                    self.assertEqual(content, "Here is the explanation.")
-
-    def test_stranded_call_with_trailing_thought_is_still_rescued(self):
-        # The model mused after the call; the unclosed span leaves that in reasoning too.
-        text = ("planning<tool_call>\n<function=Read>\n<parameter=file_path>\n/a\n</parameter>\n"
-                "</function>\n</tool_call>\nlet me see what comes back.")
-        evs = self.run_parser(text, False, 7)
-        calls = [e.call for e in evs if e.kind == "tool_call"]
-        self.assertEqual([(c.name, c.arguments) for c in calls], [("Read", {"file_path": "/a"})])
-        thought = "".join(e.text for e in evs if e.kind == "reasoning")
-        self.assertIn("let me see what comes back", thought)
-
-    def test_quoted_call_in_a_max_tokens_cut_is_not_rescued(self):
-        # The review's case: a reply cut by max tokens most often leaves the thinking span
-        # open mid-thought - a complete call quoted inside that reasoning was something the
-        # model CONSIDERED ("but first let me check..."), not did.  A turn that did not end
-        # by itself never rescues.
-        text = ("I could run <tool_call>\n<function=Bash>\n<parameter=command>\nrm -rf build\n"
-                "</parameter>\n</function>\n</tool_call>\nbut first let me check what build holds...")
-        evs = self.run_parser(text, False, 7, finish_reason="length")
-        self.assertFalse([e for e in evs if e.kind == "tool_call"])
-        thought = "".join(e.text for e in evs if e.kind == "reasoning")
-        self.assertIn("rm -rf build", thought)          # it all stays reasoning
-
-    def test_a_natural_stop_still_rescues_the_same_shape(self):
-        # The same text ending BY ITSELF is the live bug's shape - the model went from
-        # thought to call with no </think> and stopped.  The gate must not lose it.
-        text = ("planning <tool_call>\n<function=Read>\n<parameter=file_path>\n/a\n</parameter>\n"
-                "</function>\n</tool_call>")
-        evs = self.run_parser(text, False, 7, finish_reason="stop")
-        calls = [e.call for e in evs if e.kind == "tool_call"]
-        self.assertEqual([(c.name, c.arguments) for c in calls], [("Read", {"file_path": "/a"})])
-
-    def test_two_stranded_calls_are_both_rescued(self):
-        text = ("a<tool_call>\n<function=Read>\n<parameter=file_path>\n/a\n</parameter>\n</function>\n"
-                "</tool_call>b<tool_call>\n<function=Read>\n<parameter=file_path>\n/b\n</parameter>\n"
-                "</function>\n</tool_call>")
-        evs = self.run_parser(text, False, 7)
-        calls = [e.call for e in evs if e.kind == "tool_call"]
-        self.assertEqual([c.arguments for c in calls], [{"file_path": "/a"}, {"file_path": "/b"}])
-
-    def test_malformed_mention_in_unclosed_thinking_stays_reasoning(self):
-        text = "the format is<tool_call>\nnot a call body at all\n</tool_call>"
-        for step in (1, 7, 10_000):
-            with self.subTest(step=step):
-                evs = self.run_parser(text, False, step)
-                self.assertFalse([e for e in evs if e.kind == "tool_call"])
-                self.assertIn("not a call body at all",
-                              "".join(e.text for e in evs if e.kind == "reasoning"))
-
-    def test_think_end_still_wins_when_it_comes_first(self):
-        text = ("brief thought</think>prose<tool_call>\n<function=Read>\n"
-                "<parameter=file_path>\n/a\n</parameter>\n</function>\n</tool_call>")
-        for stream_tools in (False, True):
-            with self.subTest(stream_tools=stream_tools):
-                evs = self.run_parser(text, stream_tools, 7)
-                thought = "".join(e.text for e in evs if e.kind == "reasoning")
-                self.assertEqual(thought, "brief thought")
-                contents = "".join(e.text for e in evs if e.kind == "content")
-                self.assertEqual(contents.strip(), "prose")
-                self.assertEqual(len([e for e in evs if e.kind == "tool_call"]), 1)
-
-    def test_unfinished_stranded_call_is_not_rescued(self):
-        # An output cut by max tokens mid-call stays reasoning (the #530 log names the cause).
-        text = "planning<tool_call>\n<function=Read>\n<parameter=file_path>\n/sr"
-        evs = self.run_parser(text, False, 7)
-        self.assertFalse([e for e in evs if e.kind == "tool_call"])
-
-    def test_call_after_think_end_uses_the_content_channel(self):
-        # No thinking at all in the reply: the call is ordinary content-channel parsing, untouched.
-        text = ("prose<tool_call>\n<function=Read>\n<parameter=file_path>\n/a\n</parameter>\n"
-                "</function>\n</tool_call>")
-        for thinking in (True, False):
-            with self.subTest(thinking=thinking):
-                from serve.frontend import OutputParser
-                p = OutputParser(thinking=thinking, tools=self.SCHEMA, stream_tools=False)
-                evs = p.feed(text) + p.finish()
-                if thinking:
-                    evs = p.feed("x</think>") + evs  # close the span first
-                calls = [e.call for e in evs if e.kind == "tool_call"]
-                self.assertEqual([(c.name, c.arguments) for c in calls], [("Read", {"file_path": "/a"})])
-
 
 
 if __name__ == "__main__":

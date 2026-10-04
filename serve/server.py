@@ -2588,6 +2588,9 @@ class Service:
         timings, before = None, None                    # this request's timings; the engine's `last` before it
         raw_ids = []                                    # every generated id (STRATA_DEBUG: dump raw model text)
         emb = getattr(self.embeddings, "path", None)
+        # Identity token: only a DONE line replaces engine.last, so a request that died, errored or was
+        # disconnected must not have the PREVIOUS request's decode figures recorded as its own.
+        engine_last0 = getattr(self.engine, "last", None)
         # A reasoning-budget continuation is another native generation, not another API request.
         # Preserve each DONE so generated reasoning cannot become this request's cached input.
         segments = []
