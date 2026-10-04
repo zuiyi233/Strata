@@ -3284,12 +3284,24 @@ int main(int argc, char** argv) {
         // #286: an unbuffered file tier reads the pairs in batches of 64, the next batch while this one is copied
         std::future<void> ahead;
         auto read_batch = [&](int64_t at) { src.prefetch_pairs(profile.data() + at, std::min<int64_t>(64, want - at)); };
+        // mapped reads: advise the next `fill_ahead` pairs so their reads overlap; STRATA_FILL_AHEAD=0 turns it off
+        int64_t fill_ahead = 0;
+        if (!per_layer && srcp == &src && !src.unbuffered()) {
+            const char* v = std::getenv("STRATA_FILL_AHEAD");
+            fill_ahead = v == nullptr ? 256 : std::max(0, std::atoi(v));
+            if (fill_ahead > 0 && !src.advise_pairs(profile.data(), std::min<int64_t>(fill_ahead, want))) fill_ahead = 0;
+            std::fprintf(stderr, "strata generate: the profile fill asks for %lld pairs ahead (STRATA_FILL_AHEAD)\n",
+                         (long long) fill_ahead);
+        }
+        const auto fill_t0 = std::chrono::steady_clock::now();
+        uint64_t fill_bytes = 0;
         for (int64_t i = 0; i < want; ++i) {
             if (!per_layer && srcp == &src && src.unbuffered() && i % 64 == 0) {
                 if (ahead.valid()) ahead.get();
                 else read_batch(i);
                 if (i + 64 < want) ahead = std::async(std::launch::async, read_batch, i + 64);
             }
+            if (fill_ahead > 0 && i + fill_ahead < want) (void) src.advise_pairs(profile.data() + i + fill_ahead, 1);
             const int32_t slot = xcache.admit(profile[(size_t) i].first, profile[(size_t) i].second);
             if (slot == strata::core::kNotResident) {
                 if (per_layer) continue;
@@ -3302,8 +3314,10 @@ int main(int argc, char** argv) {
                              (long long) i, err.c_str());
                 return 1;
             }
+            fill_bytes += strata::kernels::cpu::expert_layout().blob_bytes(profile[(size_t) i].first);
             ++prefilled;
         }
+        const double fill_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - fill_t0).count();
         // **AND ONE SLOT IS READ BACK AND COMPARED.**  A residency table that is right about indices and wrong
         // about bytes produces a plausible token, which is this project's most expensive failure mode; the
         // cache's own `verify_slot` is the check and it costs one 1.38 MB D2H at startup.
@@ -3314,8 +3328,10 @@ int main(int argc, char** argv) {
             return 1;
         }
         mem_mark("the profile fill");
-        std::fprintf(stderr, "strata generate: pre-filled %lld of %lld slots from the profile; slot 0 verified\n",
-                     (long long) prefilled, (long long) (per_layer ? xcache.slots() : want));
+        std::fprintf(stderr, "strata generate: pre-filled %lld of %lld slots from the profile in %.1f s (%.0f MB/s); "
+                             "slot 0 verified\n",
+                     (long long) prefilled, (long long) (per_layer ? xcache.slots() : want), fill_s,
+                     fill_s > 0 ? (double) fill_bytes / 1e6 / fill_s : 0.0);
     }
 
     for (auto& stp : stages) {
