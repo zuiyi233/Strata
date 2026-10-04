@@ -665,8 +665,10 @@ bool finish_capture(cudaStream_t cs, bool ok, cudaGraphExec_t& exec, const char*
         return false;
     }
     if (ce != cudaSuccess || cudaGraphInstantiate(&exec, graph, 0) != cudaSuccess) {
+        const cudaError_t ei = cudaGetLastError();   // the instantiate failure hides behind EndCapture's success
         if (graph) cudaGraphDestroy(graph);
-        err = std::string("mtp: ") + what + " capture: " + cudaGetErrorString(ce);
+        err = std::string("mtp: ") + what + " capture: end=" + cudaGetErrorString(ce) +
+              ", instantiate=" + cudaGetErrorString(ei);
         return false;
     }
     cudaGraphDestroy(graph);
