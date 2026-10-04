@@ -169,22 +169,6 @@ __global__ void native_swiglu_quantize_q8_1_kernel(const float* __restrict__ gat
     if (i % Q8K == 0) y[i / Q8K].ds = make_half2(d, sum);
 }
 
-__launch_bounds__(QUANT_THREADS, 1)
-__global__ void native_swiglu_quantize_q8_1_kernel(const float* __restrict__ gate,
-                                                   const float* __restrict__ up,
-                                                   Q81Block* __restrict__ y, int n_in) {
-    const int i = int(blockIdx.x) * QUANT_THREADS + int(threadIdx.x);
-    if (i >= n_in) return; // n_in is a multiple of 32: only whole warps return.
-    const float gi = gate[i];
-    const float xi = __fmul_rn(__fdividef(gi, __fadd_rn(1.0f, __expf(-gi))), up[i]);
-    const float amax = warp_max(fabsf(xi));
-    const float sum = warp_sum(xi);
-    const float d = amax / 127.0f;
-    const int8_t q = amax == 0.0f ? 0 : roundf(xi / d);
-    y[i / Q8K].qs[i % Q8K] = q;
-    if (i % Q8K == 0) y[i / Q8K].ds = make_half2(d, sum);
-}
-
 // Exact pinned vec_dot_q5_K_q8_1_impl_vmmq expression and integer dot order.
 __device__ __forceinline__ float q5_q8_dot_impl(
     const int* __restrict__ vl, const int* __restrict__ vh, const int* __restrict__ u,

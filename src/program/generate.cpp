@@ -6877,6 +6877,7 @@ int main(int argc, char** argv) {
             return true;
         };
         for (;;) {
+            bool resumed_from0 = false;   // a prompt read parked in a slot (BYIELD) that had started at token 0
             if (batch_on() || (piped && pipe_inflight())) {
                 if (!try_next_line(line)) {
                     if (!(piped ? pump(true) : batch_step())) return 1;
@@ -7242,7 +7243,6 @@ if (o.prompt_cache > 0 && want_cvec == cvec_cached) {
             // source too - its sessions are copied back below, so only the new part is read
             int slot_source = -1;
             int64_t slot_tokens = 0;
-            bool resumed_from0 = false;   // a prompt read parked in a slot (BYIELD) that had started at token 0
             const ConvCheckpoint* slot_ck = nullptr;   // the slot's checkpoint the prompt continues from (else its end)
             if (o.prompt_cache > 0 && req_imgs.empty())
                 for (int b = 0; b < (int) bs.size(); ++b) {
@@ -7841,8 +7841,7 @@ if (o.prompt_cache > 0 && want_cvec == cvec_cached) {
                 if ((to == turn_at || to == root_at || to == message_at) && !checkpoint_at(to)) {
                     std::printf("ERR saving a conversation checkpoint failed%s\n", ckpt_why.c_str());
                 if (trace && to == message_at)
-                    std::fprintf(stderr, "strata serve: message boundary checkpoint: %lld tokens, %lld tail
-",
+                    std::fprintf(stderr, "strata serve: message boundary checkpoint: %lld tokens, %lld tail\n",
                                  (long long) message_at, (long long) (turn_at - message_at));
                     return 1;
                 }
